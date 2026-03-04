@@ -16,7 +16,7 @@ fn main() -> anyhow::Result<()> {
 
     let event_loop = EventLoop::new().context("failed to create event loop")?;
     let window = WindowBuilder::new()
-        .with_title("AI-First Hybrid 3D Engine | PR #3")
+        .with_title("AI-First Hybrid 3D Engine | PR #4")
         .with_inner_size(INITIAL_SIZE)
         .build(&event_loop)
         .context("failed to create window")?;
