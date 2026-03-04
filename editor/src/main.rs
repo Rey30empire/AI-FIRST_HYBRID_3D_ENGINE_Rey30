@@ -2,21 +2,25 @@ mod input;
 
 use anyhow::Context;
 use input::InputState;
+use std::fs;
 use std::time::{Duration, Instant};
 use winit::dpi::PhysicalSize;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
+use winit::keyboard::KeyCode;
 use winit::window::WindowBuilder;
 
 const INITIAL_SIZE: PhysicalSize<u32> = PhysicalSize::new(1280, 720);
 const DEMO_SCENE_PATH: &str = "samples/demo_scene.json";
+const GENERATED_SCENE_PATH: &str = "samples/generated_scene.json";
 
 fn main() -> anyhow::Result<()> {
+    let _ = dotenvy::dotenv();
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     let event_loop = EventLoop::new().context("failed to create event loop")?;
     let window = WindowBuilder::new()
-        .with_title("AI-First Hybrid 3D Engine | PR #4")
+        .with_title("AI-First Hybrid 3D Engine | PR #5")
         .with_inner_size(INITIAL_SIZE)
         .build(&event_loop)
         .context("failed to create window")?;
@@ -37,6 +41,22 @@ fn main() -> anyhow::Result<()> {
         scene.name,
         world.entity_count()
     );
+
+    let mut ai_config = ai::EngineAiConfig::from_env();
+    let mut ai_orchestrator = match ai::AiOrchestrator::new(ai_config.clone(), "logs/ai_tool_calls")
+    {
+        Ok(orchestrator) => orchestrator,
+        Err(err) => {
+            log::error!(
+                "failed to initialize AI mode {}: {err}. Falling back to OFF.",
+                ai_config.mode.as_str()
+            );
+            ai_config.mode = ai::AiMode::Off;
+            ai::AiOrchestrator::new(ai_config, "logs/ai_tool_calls")
+                .context("failed to initialize AI in OFF mode")?
+        }
+    };
+    log::info!("AI runtime: {}", ai_orchestrator.status());
 
     let mut renderer = pollster::block_on(render::Renderer::new(window))
         .context("failed to initialize renderer")?;
@@ -69,6 +89,46 @@ fn main() -> anyhow::Result<()> {
                         let stats = frame_clock.tick();
                         let dt = stats.delta.as_secs_f32().min(0.1);
 
+                        if input.consume_key_press(KeyCode::F1) {
+                            if let Err(err) = ai_orchestrator.set_mode(ai::AiMode::Off) {
+                                log::error!("failed to set AI mode OFF: {err}");
+                            }
+                        }
+                        if input.consume_key_press(KeyCode::F2) {
+                            if let Err(err) = ai_orchestrator.set_mode(ai::AiMode::Api) {
+                                log::error!("failed to set AI mode API: {err}");
+                            }
+                        }
+                        if input.consume_key_press(KeyCode::F3) {
+                            if let Err(err) = ai_orchestrator.set_mode(ai::AiMode::Local) {
+                                log::error!("failed to set AI mode LOCAL: {err}");
+                            }
+                        }
+                        if input.consume_key_press(KeyCode::F6) {
+                            let prompt = std::env::var("WORLD_BUILDER_PROMPT")
+                                .unwrap_or_else(|_| "create a medieval island map".to_string());
+                            match ai_orchestrator.world_builder(&prompt) {
+                                Ok(generated_scene) => {
+                                    if let Err(err) =
+                                        save_scene_json(&generated_scene, GENERATED_SCENE_PATH)
+                                    {
+                                        log::error!("failed to save generated scene: {err}");
+                                    } else {
+                                        log::info!(
+                                            "world builder generated '{}' to '{}'",
+                                            generated_scene.name,
+                                            GENERATED_SCENE_PATH
+                                        );
+                                    }
+                                }
+                                Err(err) => log::warn!("world builder call failed: {err}"),
+                            }
+                        }
+
+                        if let Err(err) = ai_orchestrator.tick() {
+                            log::warn!("AI runtime tick failed: {err}");
+                        }
+
                         let (move_right, move_up, move_forward) = input.movement_axes();
                         camera.translate_local(move_right, move_up, move_forward, dt);
 
@@ -99,7 +159,8 @@ fn main() -> anyhow::Result<()> {
                             let eye = camera.eye();
                             let target = camera.target();
                             window.set_title(&format!(
-                                "AI-First Hybrid 3D Engine | {:.1} FPS | {:.2} ms | Eye [{:.1},{:.1},{:.1}] -> Target [{:.1},{:.1},{:.1}]",
+                                "AI-First Hybrid 3D Engine | {} | {:.1} FPS | {:.2} ms | Eye [{:.1},{:.1},{:.1}] -> Target [{:.1},{:.1},{:.1}]",
+                                ai_orchestrator.mode().as_str(),
                                 stats.fps,
                                 stats.frame_time_ms,
                                 eye[0],
@@ -111,6 +172,8 @@ fn main() -> anyhow::Result<()> {
                             ));
                             last_title_update = Instant::now();
                         }
+
+                        input.end_frame();
                     }
                     _ => {}
                 }
@@ -122,5 +185,12 @@ fn main() -> anyhow::Result<()> {
         }
     })?;
 
+    Ok(())
+}
+
+fn save_scene_json(scene: &assets::SceneFile, path: &str) -> anyhow::Result<()> {
+    let json = serde_json::to_string_pretty(scene).context("failed to serialize scene to json")?;
+    fs::write(path, json)
+        .with_context(|| format!("failed to write generated scene to '{}'", path))?;
     Ok(())
 }

@@ -6,12 +6,15 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+ai = { path = "../ai" }
 assets = { path = "../assets" }
+dotenvy.workspace = true
 ecs = { path = "../ecs" }
 engine_core = { path = "../engine_core" }
 env_logger.workspace = true
 log.workspace = true
 pollster.workspace = true
 render = { path = "../render" }
+serde_json.workspace = true
 wgpu.workspace = true
 winit.workspace = true

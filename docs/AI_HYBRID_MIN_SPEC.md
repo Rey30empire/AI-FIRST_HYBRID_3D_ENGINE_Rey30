@@ -61,3 +61,14 @@ Flow:
 - OFF mode proves zero AI initialization
 - LOCAL mode runs in separate process and can be terminated independently
 - One `World Builder` call creates a valid base scene from prompt
+
+## Implementation Status
+
+- Implemented in PR #5:
+  - `AiOrchestrator` with runtime switching (`OFF/API/LOCAL`)
+  - Local MLL supervisor in separate process (`llama-server` compatible)
+  - Audit logs in `logs/ai_tool_calls/YYYY-MM-DD.log`
+  - World Builder generation + scene export to `samples/generated_scene.json`
+- Pending for next iteration:
+  - Real provider HTTP tool-calling in `API` mode
+  - IPC RPC schema for deep local model tool invocation

@@ -1,0 +1,32 @@
+{
+  "name": "Generated Medieval Island",
+  "entities": [
+    {
+      "name": "IslandTerrain",
+      "mesh": "cube",
+      "translation": [
+        0.0,
+        -1.0,
+        0.0
+      ]
+    },
+    {
+      "name": "CastleCore",
+      "mesh": "cube",
+      "translation": [
+        2.0,
+        0.5,
+        -1.0
+      ]
+    },
+    {
+      "name": "VillageCluster",
+      "mesh": "cube",
+      "translation": [
+        -2.5,
+        0.2,
+        1.5
+      ]
+    }
+  ]
+}

@@ -5,6 +5,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 #[derive(Default)]
 pub struct InputState {
     pressed_keys: HashSet<KeyCode>,
+    just_pressed_keys: HashSet<KeyCode>,
     orbit_drag_active: bool,
     last_cursor: Option<(f64, f64)>,
     orbit_delta: (f32, f32),
@@ -18,7 +19,9 @@ impl InputState {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     match event.state {
                         ElementState::Pressed => {
-                            self.pressed_keys.insert(code);
+                            if self.pressed_keys.insert(code) {
+                                self.just_pressed_keys.insert(code);
+                            }
                         }
                         ElementState::Released => {
                             self.pressed_keys.remove(&code);
@@ -74,6 +77,14 @@ impl InputState {
         let delta = self.scroll_delta;
         self.scroll_delta = 0.0;
         delta
+    }
+
+    pub fn consume_key_press(&mut self, key: KeyCode) -> bool {
+        self.just_pressed_keys.remove(&key)
+    }
+
+    pub fn end_frame(&mut self) {
+        self.just_pressed_keys.clear();
     }
 }
 
