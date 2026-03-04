@@ -42,22 +42,48 @@ impl Vertex {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct CameraUniform {
+    view_proj: [[f32; 4]; 4],
+}
+
+impl Default for CameraUniform {
+    fn default() -> Self {
+        Self {
+            view_proj: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+        }
+    }
+}
+
 const TRIANGLE: [Vertex; 3] = [
     Vertex {
-        position: [0.0, 0.65, 0.0],
+        position: [0.0, 0.8, 0.0],
         color: [1.0, 0.35, 0.35],
     },
     Vertex {
-        position: [-0.7, -0.65, 0.0],
+        position: [-0.9, -0.8, 0.0],
         color: [0.25, 1.0, 0.45],
     },
     Vertex {
-        position: [0.7, -0.65, 0.0],
+        position: [0.9, -0.8, 0.0],
         color: [0.3, 0.5, 1.0],
     },
 ];
 
 const SHADER: &str = r#"
+struct Camera {
+    view_proj: mat4x4<f32>,
+}
+
+@group(0) @binding(0)
+var<uniform> camera: Camera;
+
 struct VsOut {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec3<f32>,
@@ -66,7 +92,7 @@ struct VsOut {
 @vertex
 fn vs_main(@location(0) position: vec3<f32>, @location(1) color: vec3<f32>) -> VsOut {
     var out: VsOut;
-    out.position = vec4<f32>(position, 1.0);
+    out.position = camera.view_proj * vec4<f32>(position, 1.0);
     out.color = color;
     return out;
 }
@@ -86,6 +112,8 @@ pub struct Renderer<'window> {
     pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     vertex_count: u32,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
 }
 
 impl<'window> Renderer<'window> {
@@ -145,9 +173,38 @@ impl<'window> Renderer<'window> {
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
         });
 
+        let camera_uniform = CameraUniform::default();
+        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("camera-buffer"),
+            contents: bytemuck::bytes_of(&camera_uniform),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("camera-bind-group-layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("camera-bind-group"),
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_buffer.as_entire_binding(),
+            }],
+        });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("triangle-layout"),
-            bind_group_layouts: &[],
+            bind_group_layouts: &[&camera_bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -191,6 +248,8 @@ impl<'window> Renderer<'window> {
             pipeline,
             vertex_buffer,
             vertex_count: TRIANGLE.len() as u32,
+            camera_buffer,
+            camera_bind_group,
         })
     }
 
@@ -203,6 +262,12 @@ impl<'window> Renderer<'window> {
         self.config.width = new_size.width;
         self.config.height = new_size.height;
         self.surface.configure(&self.device, &self.config);
+    }
+
+    pub fn update_camera(&mut self, view_proj: [[f32; 4]; 4]) {
+        let uniform = CameraUniform { view_proj };
+        self.queue
+            .write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
@@ -237,6 +302,7 @@ impl<'window> Renderer<'window> {
                 timestamp_writes: None,
             });
             pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.camera_bind_group, &[]);
             pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             pass.draw(0..self.vertex_count, 0..1);
         }

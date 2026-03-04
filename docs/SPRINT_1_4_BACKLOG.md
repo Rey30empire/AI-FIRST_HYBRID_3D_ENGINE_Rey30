@@ -28,7 +28,7 @@ KPI target: 60 FPS stable at 1080p in demo scene.
   - Risks: Invalid JSON breaks startup.
   - Mitigation: Parse errors logged, fallback scene created.
 
-- [ ] S1-ENG-03 Camera orbit + WASD
+- [x] S1-ENG-03 Camera orbit + WASD
   - Owner: engine
   - Done: Orbit mouse drag + wheel zoom + WASD movement active in scene view.
   - Risks: Input mapping conflicts and jitter.
