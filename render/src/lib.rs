@@ -1,4 +1,5 @@
 use bytemuck::{Pod, Zeroable};
+use glam::{Mat4, Vec3};
 use thiserror::Error;
 use wgpu::util::DeviceExt;
 use winit::dpi::PhysicalSize;
@@ -6,6 +7,8 @@ use winit::window::Window;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+const SHADOW_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+const SHADOW_MAP_SIZE: u32 = 2048;
 
 #[derive(Debug, Error)]
 pub enum RenderError {
@@ -49,11 +52,13 @@ impl Vertex {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct SceneUniform {
     view_proj: [[f32; 4]; 4],
+    light_view_proj: [[f32; 4]; 4],
     camera_position: [f32; 4],
     light_direction: [f32; 4],
     light_color: [f32; 4],
     material: [f32; 4],
     base_color: [f32; 4],
+    shadow_params: [f32; 4],
 }
 
 impl Default for SceneUniform {
@@ -65,11 +70,18 @@ impl Default for SceneUniform {
                 [0.0, 0.0, 1.0, 0.0],
                 [0.0, 0.0, 0.0, 1.0],
             ],
+            light_view_proj: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
             camera_position: [0.0, 0.0, 4.0, 1.0],
             light_direction: [-0.5, -1.0, -0.3, 0.0],
             light_color: [5.5, 5.2, 5.0, 1.0],
             material: [0.2, 0.45, 1.0, 0.0],
             base_color: [0.93, 0.55, 0.36, 1.0],
+            shadow_params: [0.0018, 1.0, 0.0, 0.0],
         }
     }
 }
@@ -100,6 +112,11 @@ struct DepthTarget {
 }
 
 struct HdrTarget {
+    view: wgpu::TextureView,
+    _texture: wgpu::Texture,
+}
+
+struct ShadowTarget {
     view: wgpu::TextureView,
     _texture: wgpu::Texture,
 }
@@ -213,28 +230,39 @@ const PI: f32 = 3.14159265359;
 
 struct Scene {
     view_proj: mat4x4<f32>,
+    light_view_proj: mat4x4<f32>,
     camera_position: vec4<f32>,
     light_direction: vec4<f32>,
     light_color: vec4<f32>,
     material: vec4<f32>,
     base_color: vec4<f32>,
+    shadow_params: vec4<f32>,
 }
 
 @group(0) @binding(0)
 var<uniform> scene: Scene;
 
+@group(1) @binding(0)
+var shadow_map: texture_depth_2d;
+
+@group(1) @binding(1)
+var shadow_sampler: sampler_comparison;
+
 struct VsOut {
     @builtin(position) position: vec4<f32>,
     @location(0) world_pos: vec3<f32>,
     @location(1) normal: vec3<f32>,
+    @location(2) light_clip: vec4<f32>,
 }
 
 @vertex
 fn vs_main(@location(0) position: vec3<f32>, @location(1) normal: vec3<f32>) -> VsOut {
     var out: VsOut;
-    out.position = scene.view_proj * vec4<f32>(position, 1.0);
+    let world = vec4<f32>(position, 1.0);
+    out.position = scene.view_proj * world;
     out.world_pos = position;
     out.normal = normal;
+    out.light_clip = scene.light_view_proj * world;
     return out;
 }
 
@@ -266,6 +294,25 @@ fn fresnel_schlick(cos_theta: f32, f0: vec3<f32>) -> vec3<f32> {
     return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - cos_theta, 5.0);
 }
 
+fn sample_shadow(light_clip: vec4<f32>, bias: f32) -> f32 {
+    let proj = light_clip.xyz / max(light_clip.w, 0.0001);
+    let uv = proj.xy * 0.5 + vec2<f32>(0.5, 0.5);
+    let depth = proj.z * 0.5 + 0.5;
+
+    if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0 || depth <= 0.0 || depth >= 1.0) {
+        return 1.0;
+    }
+
+    let tex_size = vec2<f32>(textureDimensions(shadow_map));
+    let texel = 1.0 / tex_size;
+    var sum = 0.0;
+    sum += textureSampleCompare(shadow_map, shadow_sampler, uv + texel * vec2<f32>(-0.75, -0.75), depth - bias);
+    sum += textureSampleCompare(shadow_map, shadow_sampler, uv + texel * vec2<f32>( 0.75, -0.75), depth - bias);
+    sum += textureSampleCompare(shadow_map, shadow_sampler, uv + texel * vec2<f32>(-0.75,  0.75), depth - bias);
+    sum += textureSampleCompare(shadow_map, shadow_sampler, uv + texel * vec2<f32>( 0.75,  0.75), depth - bias);
+    return sum * 0.25;
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let albedo = scene.base_color.xyz;
@@ -279,7 +326,6 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let h = normalize(v + l);
 
     let f0 = mix(vec3<f32>(0.04, 0.04, 0.04), albedo, vec3<f32>(metallic));
-
     let ndf = distribution_ggx(n, h, roughness);
     let g = geometry_smith(n, v, l, roughness);
     let f = fresnel_schlick(max(dot(h, v), 0.0), f0);
@@ -292,12 +338,34 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let kd = (vec3<f32>(1.0) - ks) * (1.0 - metallic);
     let n_dot_l = max(dot(n, l), 0.0);
 
+    let shadow = sample_shadow(in.light_clip, scene.shadow_params.x) * scene.shadow_params.y;
     let radiance = scene.light_color.xyz;
-    let lo = (kd * albedo / PI + specular) * radiance * n_dot_l;
+    let lo = (kd * albedo / PI + specular) * radiance * n_dot_l * shadow;
     let ambient = vec3<f32>(0.03, 0.03, 0.03) * albedo * ao;
 
     let hdr_linear = ambient + lo;
     return vec4<f32>(hdr_linear, 1.0);
+}
+"#;
+
+const SHADOW_SHADER: &str = r#"
+struct Scene {
+    view_proj: mat4x4<f32>,
+    light_view_proj: mat4x4<f32>,
+    camera_position: vec4<f32>,
+    light_direction: vec4<f32>,
+    light_color: vec4<f32>,
+    material: vec4<f32>,
+    base_color: vec4<f32>,
+    shadow_params: vec4<f32>,
+}
+
+@group(0) @binding(0)
+var<uniform> scene: Scene;
+
+@vertex
+fn vs_main(@location(0) position: vec3<f32>, @location(1) _normal: vec3<f32>) -> @builtin(position) vec4<f32> {
+    return scene.light_view_proj * vec4<f32>(position, 1.0);
 }
 "#;
 
@@ -358,6 +426,8 @@ pub struct Renderer<'window> {
     scene_uniform: SceneUniform,
     scene_buffer: wgpu::Buffer,
     scene_bind_group: wgpu::BindGroup,
+    shadow_pipeline: wgpu::RenderPipeline,
+    shadow_bind_group: wgpu::BindGroup,
     pbr_pipeline: wgpu::RenderPipeline,
 
     tone_map_buffer: wgpu::Buffer,
@@ -371,6 +441,7 @@ pub struct Renderer<'window> {
 
     hdr_target: HdrTarget,
     depth_target: DepthTarget,
+    shadow_target: ShadowTarget,
 }
 
 impl<'window> Renderer<'window> {
@@ -425,7 +496,12 @@ impl<'window> Renderer<'window> {
         };
         surface.configure(&device, &config);
 
-        let scene_uniform = SceneUniform::default();
+        let mut scene_uniform = SceneUniform::default();
+        scene_uniform.light_view_proj = compute_light_view_proj([
+            scene_uniform.light_direction[0],
+            scene_uniform.light_direction[1],
+            scene_uniform.light_direction[2],
+        ]);
         let scene_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("scene-buffer"),
             contents: bytemuck::bytes_of(&scene_uniform),
@@ -454,13 +530,93 @@ impl<'window> Renderer<'window> {
             }],
         });
 
+        let shadow_target = Self::create_shadow_target(&device);
+        let shadow_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("shadow-sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            ..wgpu::SamplerDescriptor::default()
+        });
+        let shadow_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("shadow-bind-group-layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Depth,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                        count: None,
+                    },
+                ],
+            });
+        let shadow_bind_group = Self::create_shadow_bind_group(
+            &device,
+            &shadow_bind_group_layout,
+            &shadow_target.view,
+            &shadow_sampler,
+        );
+
+        let shadow_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("shadow-shader"),
+            source: wgpu::ShaderSource::Wgsl(SHADOW_SHADER.into()),
+        });
+        let shadow_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("shadow-layout"),
+                bind_group_layouts: &[&scene_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let shadow_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("shadow-pipeline"),
+            layout: Some(&shadow_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shadow_shader,
+                entry_point: "vs_main",
+                buffers: &[Vertex::layout()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: None,
+            primitive: wgpu::PrimitiveState {
+                cull_mode: Some(wgpu::Face::Back),
+                ..wgpu::PrimitiveState::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: SHADOW_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState {
+                    constant: 2,
+                    slope_scale: 2.0,
+                    clamp: 0.0,
+                },
+            }),
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
         let pbr_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("pbr-hdr-shader"),
             source: wgpu::ShaderSource::Wgsl(PBR_SHADER.into()),
         });
         let pbr_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pbr-layout"),
-            bind_group_layouts: &[&scene_bind_group_layout],
+            bind_group_layouts: &[&scene_bind_group_layout, &shadow_bind_group_layout],
             push_constant_ranges: &[],
         });
         let pbr_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -594,6 +750,8 @@ impl<'window> Renderer<'window> {
             scene_uniform,
             scene_buffer,
             scene_bind_group,
+            shadow_pipeline,
+            shadow_bind_group,
             pbr_pipeline,
             tone_map_buffer,
             tone_map_bind_group_layout,
@@ -604,6 +762,7 @@ impl<'window> Renderer<'window> {
             index_count: CUBE_INDICES.len() as u32,
             hdr_target,
             depth_target,
+            shadow_target,
         })
     }
 
@@ -635,6 +794,11 @@ impl<'window> Renderer<'window> {
             camera_position[2],
             1.0,
         ];
+        self.scene_uniform.light_view_proj = compute_light_view_proj([
+            self.scene_uniform.light_direction[0],
+            self.scene_uniform.light_direction[1],
+            self.scene_uniform.light_direction[2],
+        ]);
         self.queue.write_buffer(
             &self.scene_buffer,
             0,
@@ -652,6 +816,28 @@ impl<'window> Renderer<'window> {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("main-render-encoder"),
             });
+
+        {
+            let mut shadow_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("shadow-pass"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.shadow_target.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            shadow_pass.set_pipeline(&self.shadow_pipeline);
+            shadow_pass.set_bind_group(0, &self.scene_bind_group, &[]);
+            shadow_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            shadow_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            shadow_pass.draw_indexed(0..self.index_count, 0, 0..1);
+        }
 
         {
             let mut pbr_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -682,6 +868,7 @@ impl<'window> Renderer<'window> {
             });
             pbr_pass.set_pipeline(&self.pbr_pipeline);
             pbr_pass.set_bind_group(0, &self.scene_bind_group, &[]);
+            pbr_pass.set_bind_group(1, &self.shadow_bind_group, &[]);
             pbr_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             pbr_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             pbr_pass.draw_indexed(0..self.index_count, 0, 0..1);
@@ -764,6 +951,50 @@ impl<'window> Renderer<'window> {
         }
     }
 
+    fn create_shadow_target(device: &wgpu::Device) -> ShadowTarget {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("shadow-map-texture"),
+            size: wgpu::Extent3d {
+                width: SHADOW_MAP_SIZE,
+                height: SHADOW_MAP_SIZE,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: SHADOW_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        ShadowTarget {
+            view,
+            _texture: texture,
+        }
+    }
+
+    fn create_shadow_bind_group(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        shadow_view: &wgpu::TextureView,
+        shadow_sampler: &wgpu::Sampler,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shadow-bind-group"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(shadow_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(shadow_sampler),
+                },
+            ],
+        })
+    }
+
     fn create_tone_map_bind_group(
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
@@ -785,4 +1016,18 @@ impl<'window> Renderer<'window> {
             ],
         })
     }
+}
+
+fn compute_light_view_proj(light_direction: [f32; 3]) -> [[f32; 4]; 4] {
+    let mut dir = Vec3::from_array(light_direction);
+    if dir.length_squared() < 1e-6 {
+        dir = Vec3::new(-0.5, -1.0, -0.3);
+    }
+    dir = dir.normalize();
+    let center = Vec3::ZERO;
+    let eye = center - dir * 8.0;
+    let up = if dir.y.abs() > 0.98 { Vec3::Z } else { Vec3::Y };
+    let view = Mat4::look_at_rh(eye, center, up);
+    let proj = Mat4::orthographic_rh_gl(-6.0, 6.0, -6.0, 6.0, 0.1, 24.0);
+    (proj * view).to_cols_array_2d()
 }

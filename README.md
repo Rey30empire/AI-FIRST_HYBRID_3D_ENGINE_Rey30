@@ -43,6 +43,12 @@ The app opens a 1280x720 window and renders a lit 3D cube.
 - Fullscreen tone-mapping pass resolves HDR to swapchain output
 - Exposure/gamma controls are centralized in a dedicated tone-map uniform
 
+## Directional Shadows (PR #6)
+
+- Dedicated shadow-map pass before PBR lighting
+- Depth shadow texture (`Depth32Float`) sampled with comparison sampler
+- Basic 4-tap PCF filtering and bias controls in scene uniform
+
 ## AI Hybrid Runtime (PR #5)
 
 - `OFF` mode: AI runtime not initialized

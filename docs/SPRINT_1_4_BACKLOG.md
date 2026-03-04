@@ -61,6 +61,7 @@ KPI target: cinematic interior+exterior demo with stable frame time budget.
 - [ ] S2-REND-03 Shadow maps
   - Owner: render
   - Done: Directional light shadows with configurable cascade count.
+  - Progress: PR #6 adds single directional shadow map pass + PCF sampling; cascades pending.
   - Risks: Acne/peter-panning artifacts.
   - Mitigation: Depth bias tuning presets + PCF filtering.
 
