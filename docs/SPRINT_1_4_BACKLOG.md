@@ -51,9 +51,10 @@ KPI target: cinematic interior+exterior demo with stable frame time budget.
   - Risks: Shader complexity and material mismatches.
   - Mitigation: Start with single reference material and golden renders.
 
-- [ ] S2-REND-02 HDR + tone mapping
+- [x] S2-REND-02 HDR + tone mapping
   - Owner: render
   - Done: HDR render target and tone mapper integrated.
+  - Progress: PR #4 implements 2-pass render (`HDR -> tone map -> swapchain`) with exposure/gamma uniform.
   - Risks: Over/under exposure across scenes.
   - Mitigation: Auto-exposure clamp + histogram debug view.
 

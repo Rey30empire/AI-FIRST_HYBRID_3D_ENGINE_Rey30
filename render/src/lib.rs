@@ -5,6 +5,7 @@ use winit::dpi::PhysicalSize;
 use winit::window::Window;
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
+const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 #[derive(Debug, Error)]
 pub enum RenderError {
@@ -66,14 +67,39 @@ impl Default for SceneUniform {
             ],
             camera_position: [0.0, 0.0, 4.0, 1.0],
             light_direction: [-0.5, -1.0, -0.3, 0.0],
-            light_color: [4.5, 4.2, 4.0, 1.0],
+            light_color: [5.5, 5.2, 5.0, 1.0],
             material: [0.2, 0.45, 1.0, 0.0],
             base_color: [0.93, 0.55, 0.36, 1.0],
         }
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ToneMapUniform {
+    exposure: f32,
+    gamma: f32,
+    _pad0: f32,
+    _pad1: f32,
+}
+
+impl Default for ToneMapUniform {
+    fn default() -> Self {
+        Self {
+            exposure: 1.0,
+            gamma: 2.2,
+            _pad0: 0.0,
+            _pad1: 0.0,
+        }
+    }
+}
+
 struct DepthTarget {
+    view: wgpu::TextureView,
+    _texture: wgpu::Texture,
+}
+
+struct HdrTarget {
     view: wgpu::TextureView,
     _texture: wgpu::Texture,
 }
@@ -182,7 +208,7 @@ const CUBE_INDICES: [u16; 36] = [
     16, 18, 19, 20, 21, 22, 20, 22, 23,
 ];
 
-const SHADER: &str = r#"
+const PBR_SHADER: &str = r#"
 const PI: f32 = 3.14159265359;
 
 struct Scene {
@@ -269,9 +295,55 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let radiance = scene.light_color.xyz;
     let lo = (kd * albedo / PI + specular) * radiance * n_dot_l;
     let ambient = vec3<f32>(0.03, 0.03, 0.03) * albedo * ao;
-    let color = ambient + lo;
-    let mapped = color / (color + vec3<f32>(1.0, 1.0, 1.0));
-    let gamma_corrected = pow(mapped, vec3<f32>(1.0 / 2.2));
+
+    let hdr_linear = ambient + lo;
+    return vec4<f32>(hdr_linear, 1.0);
+}
+"#;
+
+const TONEMAP_SHADER: &str = r#"
+struct ToneMap {
+    exposure: f32,
+    gamma: f32,
+    _pad0: f32,
+    _pad1: f32,
+}
+
+@group(0) @binding(0)
+var hdr_tex: texture_2d<f32>;
+
+@group(0) @binding(1)
+var<uniform> tone: ToneMap;
+
+struct VsOut {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertex_index: u32) -> VsOut {
+    var out: VsOut;
+    var position = vec2<f32>(3.0, 1.0);
+    var uv = vec2<f32>(2.0, 0.0);
+    if (vertex_index == 0u) {
+        position = vec2<f32>(-1.0, -3.0);
+        uv = vec2<f32>(0.0, 2.0);
+    } else if (vertex_index == 1u) {
+        position = vec2<f32>(-1.0, 1.0);
+        uv = vec2<f32>(0.0, 0.0);
+    }
+    out.position = vec4<f32>(position, 0.0, 1.0);
+    out.uv = uv;
+    return out;
+}
+
+@fragment
+fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+    let dims = vec2<f32>(textureDimensions(hdr_tex));
+    let texel = vec2<i32>(clamp(in.uv * dims, vec2<f32>(0.0), dims - vec2<f32>(1.0)));
+    let hdr = textureLoad(hdr_tex, texel, 0).rgb * tone.exposure;
+    let mapped = hdr / (hdr + vec3<f32>(1.0));
+    let gamma_corrected = pow(mapped, vec3<f32>(1.0 / max(tone.gamma, 0.001)));
     return vec4<f32>(gamma_corrected, 1.0);
 }
 "#;
@@ -282,13 +354,22 @@ pub struct Renderer<'window> {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     size: PhysicalSize<u32>,
-    pipeline: wgpu::RenderPipeline,
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
-    index_count: u32,
+
     scene_uniform: SceneUniform,
     scene_buffer: wgpu::Buffer,
     scene_bind_group: wgpu::BindGroup,
+    pbr_pipeline: wgpu::RenderPipeline,
+
+    tone_map_buffer: wgpu::Buffer,
+    tone_map_bind_group_layout: wgpu::BindGroupLayout,
+    tone_map_bind_group: wgpu::BindGroup,
+    tone_map_pipeline: wgpu::RenderPipeline,
+
+    vertex_buffer: wgpu::Buffer,
+    index_buffer: wgpu::Buffer,
+    index_count: u32,
+
+    hdr_target: HdrTarget,
     depth_target: DepthTarget,
 }
 
@@ -344,11 +425,6 @@ impl<'window> Renderer<'window> {
         };
         surface.configure(&device, &config);
 
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("pbr-baseline-shader"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
-        });
-
         let scene_uniform = SceneUniform::default();
         let scene_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("scene-buffer"),
@@ -378,26 +454,29 @@ impl<'window> Renderer<'window> {
             }],
         });
 
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("pbr-baseline-layout"),
+        let pbr_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("pbr-hdr-shader"),
+            source: wgpu::ShaderSource::Wgsl(PBR_SHADER.into()),
+        });
+        let pbr_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("pbr-layout"),
             bind_group_layouts: &[&scene_bind_group_layout],
             push_constant_ranges: &[],
         });
-
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("pbr-baseline-pipeline"),
-            layout: Some(&pipeline_layout),
+        let pbr_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("pbr-pipeline"),
+            layout: Some(&pbr_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &pbr_shader,
                 entry_point: "vs_main",
                 buffers: &[Vertex::layout()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &pbr_shader,
                 entry_point: "fs_main",
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
+                    format: HDR_FORMAT,
                     blend: Some(wgpu::BlendState::REPLACE),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -418,6 +497,83 @@ impl<'window> Renderer<'window> {
             multiview: None,
         });
 
+        let tone_map_uniform = ToneMapUniform::default();
+        let tone_map_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("tone-map-buffer"),
+            contents: bytemuck::bytes_of(&tone_map_uniform),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let tone_map_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("tone-map-bind-group-layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            });
+
+        let hdr_target = Self::create_hdr_target(&device, &config);
+        let depth_target = Self::create_depth_target(&device, &config);
+        let tone_map_bind_group = Self::create_tone_map_bind_group(
+            &device,
+            &tone_map_bind_group_layout,
+            &hdr_target.view,
+            &tone_map_buffer,
+        );
+
+        let tone_map_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("tone-map-shader"),
+            source: wgpu::ShaderSource::Wgsl(TONEMAP_SHADER.into()),
+        });
+        let tone_map_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("tone-map-layout"),
+                bind_group_layouts: &[&tone_map_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let tone_map_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("tone-map-pipeline"),
+            layout: Some(&tone_map_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &tone_map_shader,
+                entry_point: "vs_main",
+                buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &tone_map_shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState::default(),
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            multiview: None,
+        });
+
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("cube-vertex-buffer"),
             contents: bytemuck::cast_slice(&CUBE_VERTICES),
@@ -429,21 +585,24 @@ impl<'window> Renderer<'window> {
             usage: wgpu::BufferUsages::INDEX,
         });
 
-        let depth_target = Self::create_depth_target(&device, &config);
-
         Ok(Self {
             surface,
             device,
             queue,
             config,
             size,
-            pipeline,
-            vertex_buffer,
-            index_buffer,
-            index_count: CUBE_INDICES.len() as u32,
             scene_uniform,
             scene_buffer,
             scene_bind_group,
+            pbr_pipeline,
+            tone_map_buffer,
+            tone_map_bind_group_layout,
+            tone_map_bind_group,
+            tone_map_pipeline,
+            vertex_buffer,
+            index_buffer,
+            index_count: CUBE_INDICES.len() as u32,
+            hdr_target,
             depth_target,
         })
     }
@@ -457,7 +616,15 @@ impl<'window> Renderer<'window> {
         self.config.width = new_size.width;
         self.config.height = new_size.height;
         self.surface.configure(&self.device, &self.config);
+
         self.depth_target = Self::create_depth_target(&self.device, &self.config);
+        self.hdr_target = Self::create_hdr_target(&self.device, &self.config);
+        self.tone_map_bind_group = Self::create_tone_map_bind_group(
+            &self.device,
+            &self.tone_map_bind_group_layout,
+            &self.hdr_target.view,
+            &self.tone_map_buffer,
+        );
     }
 
     pub fn update_camera(&mut self, view_proj: [[f32; 4]; 4], camera_position: [f32; 3]) {
@@ -477,7 +644,7 @@ impl<'window> Renderer<'window> {
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let frame = self.surface.get_current_texture()?;
-        let view = frame
+        let swapchain_view = frame
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self
@@ -487,16 +654,16 @@ impl<'window> Renderer<'window> {
             });
 
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("main-render-pass"),
+            let mut pbr_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("pbr-hdr-pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view: &self.hdr_target.view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.02,
-                            g: 0.03,
-                            b: 0.06,
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -513,11 +680,36 @@ impl<'window> Renderer<'window> {
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
-            pass.set_pipeline(&self.pipeline);
-            pass.set_bind_group(0, &self.scene_bind_group, &[]);
-            pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-            pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            pass.draw_indexed(0..self.index_count, 0, 0..1);
+            pbr_pass.set_pipeline(&self.pbr_pipeline);
+            pbr_pass.set_bind_group(0, &self.scene_bind_group, &[]);
+            pbr_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+            pbr_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            pbr_pass.draw_indexed(0..self.index_count, 0, 0..1);
+        }
+
+        {
+            let mut tone_map_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("tone-map-pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &swapchain_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.01,
+                            g: 0.02,
+                            b: 0.03,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+            tone_map_pass.set_pipeline(&self.tone_map_pipeline);
+            tone_map_pass.set_bind_group(0, &self.tone_map_bind_group, &[]);
+            tone_map_pass.draw(0..3, 0..1);
         }
 
         self.queue.submit(Some(encoder.finish()));
@@ -548,5 +740,49 @@ impl<'window> Renderer<'window> {
             view,
             _texture: texture,
         }
+    }
+
+    fn create_hdr_target(device: &wgpu::Device, config: &wgpu::SurfaceConfiguration) -> HdrTarget {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("hdr-texture"),
+            size: wgpu::Extent3d {
+                width: config.width.max(1),
+                height: config.height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: HDR_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        HdrTarget {
+            view,
+            _texture: texture,
+        }
+    }
+
+    fn create_tone_map_bind_group(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        hdr_view: &wgpu::TextureView,
+        tone_map_buffer: &wgpu::Buffer,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("tone-map-bind-group"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(hdr_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: tone_map_buffer.as_entire_binding(),
+                },
+            ],
+        })
     }
 }

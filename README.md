@@ -37,6 +37,12 @@ The app opens a 1280x720 window and renders a lit 3D cube.
 - Depth testing enabled
 - Metallic/Roughness PBR baseline shading (single directional light)
 
+## HDR + Tone Mapping (PR #4)
+
+- PBR pass renders to HDR offscreen target (`RGBA16F`)
+- Fullscreen tone-mapping pass resolves HDR to swapchain output
+- Exposure/gamma controls are centralized in a dedicated tone-map uniform
+
 ## Workspace layout
 
 - `engine_core/`
