@@ -1793,6 +1793,7 @@ name = "render"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "glam",
  "thiserror 2.0.18",
  "wgpu",
  "winit",
