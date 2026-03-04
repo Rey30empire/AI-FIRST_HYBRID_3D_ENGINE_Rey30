@@ -1,0 +1,10 @@
+{
+  "name": "Starter Demo Scene",
+  "entities": [
+    {
+      "name": "StarterTriangle",
+      "mesh": "triangle",
+      "translation": [0.0, 0.0, 0.0]
+    }
+  ]
+}

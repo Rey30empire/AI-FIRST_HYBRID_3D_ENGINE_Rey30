@@ -1,0 +1,454 @@
+    PROYECTO
+AI-FIRST HYBRID 3D ENGINE
+
+Objetivo
+
+Un motor 3D que funcione de tres maneras:
+
+1️⃣ Modo Manual
+usuario crea todo sin IA (motor tradicional)
+
+2️⃣ Modo API AI
+usa modelos externos como OpenAI para generar código, assets o lógica
+
+3️⃣ Modo Local AI
+usa un modelo open-source local (MLL) como cerebro del editor
+
+El usuario puede alternar con un toggle switch.
+
+1️⃣ ARQUITECTURA GENERAL
+AI Hybrid Engine
+│
+├ Engine Core
+├ Rendering Engine
+├ Physics Engine
+├ Scene System
+├ Asset Pipeline
+├ Editor UI
+├ Addon System
+│
+├ AI Layer
+│   ├ Local MLL Engine
+│   ├ API AI Connector
+│   ├ AI Orchestrator
+│   └ Agent System
+│
+├ MCP Gateway
+├ Content Generators
+└ Build System
+2️⃣ STACK TECNOLÓGICO
+Lenguajes
+Rust → core engine
+C++ → rendering
+CUDA → GPU compute
+Python → herramientas AI
+TypeScript → editor UI
+Librerías clave
+
+Gráficos:
+
+Vulkan SDK
+bgfx
+shaderc
+SPIR-V tools
+
+Física:
+
+Jolt Physics
+
+Animación:
+
+ozz-animation
+
+Audio:
+
+FMOD
+
+Optimización mallas:
+
+meshoptimizer
+3️⃣ CORE ENGINE
+
+Componentes del núcleo:
+
+Memory Manager
+Thread Pool
+Task Scheduler
+Resource Manager
+Event Bus
+Plugin Loader
+Logger
+
+Game loop:
+
+while(engine_running)
+{
+ input.update()
+ ai.process()
+ physics.simulate()
+ animation.update()
+ scene.update()
+ renderer.draw()
+ audio.play()
+}
+4️⃣ RENDERING ENGINE
+
+Debe soportar:
+
+Vulkan
+DirectX12
+Metal
+
+Features recomendadas:
+
+PBR rendering
+HDR
+Shadow maps
+Screen space reflections
+Volumetric fog
+Post processing
+GPU instancing
+LOD
+5️⃣ SCENE SYSTEM
+
+Estructura:
+
+Scene
+ ├ Terrain
+ ├ Entities
+ ├ Lights
+ ├ Cameras
+ └ Effects
+
+Sistema ECS:
+
+Entity
+ ├ Transform
+ ├ MeshRenderer
+ ├ Collider
+ ├ Rigidbody
+ ├ Script
+ └ Animator
+6️⃣ ADDON SYSTEM
+
+Todo el motor es extensible.
+
+Estructura de addon:
+
+addon_name/
+ ├ manifest.json
+ ├ code/
+ ├ assets/
+ └ ui/
+
+Ejemplos:
+
+modeling_tools
+terrain_generator
+multiplayer_system
+ai_assistant
+7️⃣ EDITOR
+
+Paneles:
+
+Scene View
+Game View
+Hierarchy
+Inspector
+Asset Browser
+AI Chat Panel
+Console
+Profiler
+
+UI stack sugerido:
+
+React
+Tauri
+WebGPU
+8️⃣ AI LAYER
+
+La IA está separada del motor.
+
+AI Layer
+│
+├ Model Manager
+├ API Connector
+├ Prompt Engine
+├ AI Orchestrator
+└ Agent Manager
+9️⃣ TOGGLE SWITCH AI
+
+Sistema híbrido.
+
+[ OFF ] → sin IA
+[ API ] → usa API externa
+[ LOCAL ] → usa MLL local
+
+Config:
+
+AI_MODE=OFF
+AI_MODE=API
+AI_MODE=LOCAL
+🔟 MODELO LOCAL (MLL)
+
+El motor debe permitir cargar un modelo open-source.
+
+Opciones populares:
+
+Llama
+Mistral
+DeepSeek
+Code LLM
+
+Runtime:
+
+llama.cpp
+vLLM
+TensorRT-LLM
+
+Funciones del MLL:
+
+generar código
+generar escenas
+generar scripts
+controlar herramientas del editor
+1️⃣1️⃣ API AI MODE
+
+Cuando el usuario activa API mode:
+
+El motor envía requests a servicios externos.
+
+Ejemplo:
+
+generate scene
+generate model
+generate code
+
+Esto puede usar proveedores externos como OpenAI u otros.
+
+1️⃣2️⃣ AGENT SYSTEM
+
+La IA no hace todo sola.
+
+Se divide en agentes especializados.
+
+AI Orchestrator
+│
+├ World Builder Agent
+├ 3D Model Agent
+├ Animation Agent
+├ Gameplay Agent
+├ UI Agent
+└ Optimization Agent
+
+Cada agente tiene herramientas.
+
+Ejemplo:
+
+3D Model Agent
+ ├ primitive tools
+ ├ mesh editing
+ ├ uv unwrap
+ ├ texture generation
+1️⃣3️⃣ MCP GATEWAY
+
+Sistema para coordinar agentes.
+
+Arquitectura:
+
+MCP Gateway
+│
+├ Command Router
+├ Agent Bus
+├ Task Queue
+└ State Memory
+
+Comunicación:
+
+REST
+WebSocket
+1️⃣4️⃣ SISTEMA DE CHAT
+
+El editor tiene un panel de chat.
+
+Ejemplo de interacción:
+
+Usuario:
+
+create a medieval island map
+add castle
+create 3 enemies
+add magic spells
+
+El sistema convierte eso en tareas.
+
+parse prompt
+create task graph
+dispatch agents
+execute tasks
+assemble result
+1️⃣5️⃣ CREACIÓN AUTOMÁTICA DE JUEGOS
+
+Pipeline:
+
+user prompt
+↓
+AI planner
+↓
+task breakdown
+↓
+agents execute
+↓
+assets generated
+↓
+scene assembled
+↓
+game playable
+1️⃣6️⃣ GENERACIÓN DE ASSETS
+
+Los agentes pueden usar:
+
+Model generation APIs
+o herramientas internas.
+
+Tipos:
+
+3D models
+textures
+animations
+sound
+UI
+1️⃣7️⃣ SISTEMA DE PERSONAJES
+
+Incluye:
+
+humanoid mannequins
+rigged skeletons
+animation controller
+
+La IA puede:
+
+create character
+apply skin
+generate animations
+1️⃣8️⃣ TERRAIN GENERATOR
+
+Herramientas:
+
+heightmaps
+erosion
+biome system
+vegetation scatter
+1️⃣9️⃣ BUILD SYSTEM
+
+Exportación:
+
+Windows
+Linux
+Android
+iOS
+Web
+
+Pipeline:
+
+scene
+compile
+optimize
+build
+2️⃣0️⃣ PROFILER
+
+Mide:
+
+CPU
+GPU
+memory
+draw calls
+FPS
+2️⃣1️⃣ MODO SIN IA
+
+Si el usuario desactiva IA:
+
+El motor funciona como uno normal.
+
+modeling manual
+level design manual
+scripts manual
+
+Esto reduce consumo.
+
+2️⃣2️⃣ ORDEN DE CONSTRUCCIÓN
+
+FASE 1
+
+core engine
+render
+scene
+ecs
+
+FASE 2
+
+editor
+asset pipeline
+physics
+animation
+
+FASE 3
+
+addon system
+AI integration
+
+FASE 4
+
+agent system
+game generator
+🧠 RESULTADO
+
+Tendrías algo parecido a:
+
+Unity
++ Blender tools
++ AI copiloto
++ generación automática de juegos
+
+agents 
+Dev 1–2: Render + Core + ECS + perf
+
+Dev 3: Editor + UI docking + tools
+
+Dev 4: Asset pipeline + import/export + build system
+
+Dev 5: AI layer + tool-calling + toggle + MLL local
+
+Dev 6: Orchestrator + agentes + task graph + gateway 
+
+“Sistema de agentes + construcción en paralelo” (6–12 meses adicionales)
+
+Metes:
+
+Orchestrator (planner) que descompone tareas
+
+Agentes especializados: mundo, gameplay, UI, VFX, assets
+
+Cola de tareas + estados + reintentos + “rollback”
+
+Ensamblador final (integra todo en escena + builds)
+
+Librería de plantillas (“juego de saltos”, “shooter arena”, etc.)
+
+📦 Resultado: le describes un juego, y te lo arma por módulos. No perfecto AAA, pero sí jugable.
+
+⏱️ Acumulado: 16–30 meses
+
+✅ Fase 5 — “Nivel AAA cercano” (12–24 meses adicionales)
+
+Aquí ya hablamos de:
+
+World streaming grande, LOD avanzado, GPU instancing extremo
+
+Animación avanzada (retarget, IK serio)
+
+VFX pro, networking robusto, tooling avanzado
+
+Estabilidad, documentación, marketplace de addons, etc.
+
+⏱️ Acumulado: 2.5–4.5 años (dependiendo del alcance)
