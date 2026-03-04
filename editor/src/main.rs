@@ -16,7 +16,7 @@ fn main() -> anyhow::Result<()> {
 
     let event_loop = EventLoop::new().context("failed to create event loop")?;
     let window = WindowBuilder::new()
-        .with_title("AI-First Hybrid 3D Engine | PR #2")
+        .with_title("AI-First Hybrid 3D Engine | PR #3")
         .with_inner_size(INITIAL_SIZE)
         .build(&event_loop)
         .context("failed to create window")?;
@@ -84,7 +84,7 @@ fn main() -> anyhow::Result<()> {
 
                         let size = window.inner_size();
                         let aspect_ratio = size.width.max(1) as f32 / size.height.max(1) as f32;
-                        renderer.update_camera(camera.view_proj_matrix(aspect_ratio));
+                        renderer.update_camera(camera.view_proj_matrix(aspect_ratio), camera.eye());
 
                         match renderer.render() {
                             Ok(()) => {}

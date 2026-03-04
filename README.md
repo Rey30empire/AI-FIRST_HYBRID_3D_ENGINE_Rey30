@@ -6,7 +6,7 @@ Starter workspace for the hybrid game engine roadmap.
 
 - Workspace + crate structure
 - Window + main loop
-- Basic `wgpu` triangle rendering
+- `wgpu` 3D render baseline (lit cube + depth)
 - Simple scene loading from JSON
 - Basic FPS and frame-time title update
 
@@ -21,7 +21,7 @@ Starter workspace for the hybrid game engine roadmap.
 cargo run -p editor
 ```
 
-The app opens a 1280x720 window and renders a triangle.
+The app opens a 1280x720 window and renders a lit 3D cube.
 
 ## Camera Controls (PR #2)
 
@@ -30,6 +30,12 @@ The app opens a 1280x720 window and renders a triangle.
 - `W/A/S/D`: move on ground plane
 - `Space` / `Shift`: move up/down
 - `E` / `Q`: alternate up/down controls
+
+## Render Baseline (PR #3)
+
+- Perspective camera uniform in shader
+- Depth testing enabled
+- Metallic/Roughness PBR baseline shading (single directional light)
 
 ## Workspace layout
 

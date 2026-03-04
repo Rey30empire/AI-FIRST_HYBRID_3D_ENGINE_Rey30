@@ -47,6 +47,7 @@ KPI target: cinematic interior+exterior demo with stable frame time budget.
 - [ ] S2-REND-01 PBR pipeline
   - Owner: render
   - Done: Metallic/Roughness materials render correctly with IBL baseline.
+  - Progress: PR #3 adds non-textured PBR baseline (metallic/roughness + directional light); IBL pending.
   - Risks: Shader complexity and material mismatches.
   - Mitigation: Start with single reference material and golden renders.
 
