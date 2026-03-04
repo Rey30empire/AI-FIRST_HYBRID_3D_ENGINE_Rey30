@@ -1,4 +1,7 @@
+mod input;
+
 use anyhow::Context;
+use input::InputState;
 use std::time::{Duration, Instant};
 use winit::dpi::PhysicalSize;
 use winit::event::{Event, WindowEvent};
@@ -13,7 +16,7 @@ fn main() -> anyhow::Result<()> {
 
     let event_loop = EventLoop::new().context("failed to create event loop")?;
     let window = WindowBuilder::new()
-        .with_title("AI-First Hybrid 3D Engine | PR #1")
+        .with_title("AI-First Hybrid 3D Engine | PR #2")
         .with_inner_size(INITIAL_SIZE)
         .build(&event_loop)
         .context("failed to create window")?;
@@ -38,6 +41,8 @@ fn main() -> anyhow::Result<()> {
     let mut renderer = pollster::block_on(render::Renderer::new(window))
         .context("failed to initialize renderer")?;
     let mut frame_clock = engine_core::FrameClock::new();
+    let mut input = InputState::default();
+    let mut camera = engine_core::OrbitCamera::new();
     let mut last_title_update = Instant::now();
 
     #[allow(deprecated)]
@@ -47,43 +52,67 @@ fn main() -> anyhow::Result<()> {
         match event {
             Event::WindowEvent {
                 window_id,
-                event: WindowEvent::CloseRequested,
+                ref event,
             } if window_id == window.id() => {
-                elwt.exit();
-            }
-            Event::WindowEvent {
-                window_id,
-                event: WindowEvent::Resized(size),
-            } if window_id == window.id() => {
-                renderer.resize(size);
-            }
-            Event::WindowEvent {
-                window_id,
-                event: WindowEvent::ScaleFactorChanged { .. },
-            } if window_id == window.id() => {
-                renderer.resize(window.inner_size());
-            }
-            Event::WindowEvent {
-                window_id,
-                event: WindowEvent::RedrawRequested,
-            } if window_id == window.id() => {
-                let stats = frame_clock.tick();
-
-                match renderer.render() {
-                    Ok(()) => {}
-                    Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                input.handle_window_event(event);
+                match event {
+                    WindowEvent::CloseRequested => {
+                        elwt.exit();
+                    }
+                    WindowEvent::Resized(size) => {
+                        renderer.resize(*size);
+                    }
+                    WindowEvent::ScaleFactorChanged { .. } => {
                         renderer.resize(window.inner_size());
                     }
-                    Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
-                    Err(wgpu::SurfaceError::Timeout) => log::warn!("surface timeout"),
-                }
+                    WindowEvent::RedrawRequested => {
+                        let stats = frame_clock.tick();
+                        let dt = stats.delta.as_secs_f32().min(0.1);
 
-                if last_title_update.elapsed() >= Duration::from_millis(300) {
-                    window.set_title(&format!(
-                        "AI-First Hybrid 3D Engine | {:.1} FPS | {:.2} ms",
-                        stats.fps, stats.frame_time_ms
-                    ));
-                    last_title_update = Instant::now();
+                        let (move_right, move_up, move_forward) = input.movement_axes();
+                        camera.translate_local(move_right, move_up, move_forward, dt);
+
+                        let (orbit_dx, orbit_dy) = input.take_orbit_delta();
+                        if orbit_dx != 0.0 || orbit_dy != 0.0 {
+                            camera.orbit(orbit_dx, orbit_dy);
+                        }
+
+                        let zoom_delta = input.take_scroll_delta();
+                        if zoom_delta != 0.0 {
+                            camera.zoom(zoom_delta);
+                        }
+
+                        let size = window.inner_size();
+                        let aspect_ratio = size.width.max(1) as f32 / size.height.max(1) as f32;
+                        renderer.update_camera(camera.view_proj_matrix(aspect_ratio));
+
+                        match renderer.render() {
+                            Ok(()) => {}
+                            Err(wgpu::SurfaceError::Lost | wgpu::SurfaceError::Outdated) => {
+                                renderer.resize(window.inner_size());
+                            }
+                            Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
+                            Err(wgpu::SurfaceError::Timeout) => log::warn!("surface timeout"),
+                        }
+
+                        if last_title_update.elapsed() >= Duration::from_millis(300) {
+                            let eye = camera.eye();
+                            let target = camera.target();
+                            window.set_title(&format!(
+                                "AI-First Hybrid 3D Engine | {:.1} FPS | {:.2} ms | Eye [{:.1},{:.1},{:.1}] -> Target [{:.1},{:.1},{:.1}]",
+                                stats.fps,
+                                stats.frame_time_ms,
+                                eye[0],
+                                eye[1],
+                                eye[2],
+                                target[0],
+                                target[1],
+                                target[2]
+                            ));
+                            last_title_update = Instant::now();
+                        }
+                    }
+                    _ => {}
                 }
             }
             Event::AboutToWait => {

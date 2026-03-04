@@ -23,6 +23,14 @@ cargo run -p editor
 
 The app opens a 1280x720 window and renders a triangle.
 
+## Camera Controls (PR #2)
+
+- Hold right mouse button + move mouse: orbit camera
+- Mouse wheel: zoom
+- `W/A/S/D`: move on ground plane
+- `Space` / `Shift`: move up/down
+- `E` / `Q`: alternate up/down controls
+
 ## Workspace layout
 
 - `engine_core/`
