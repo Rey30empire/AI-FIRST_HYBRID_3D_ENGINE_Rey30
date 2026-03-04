@@ -1,0 +1,9 @@
+[package]
+name = "ecs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+assets = { path = "../assets" }
+bevy_ecs.workspace = true
