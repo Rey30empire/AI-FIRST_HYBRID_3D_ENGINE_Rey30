@@ -15,12 +15,10 @@ fn main() -> anyhow::Result<()> {
 
     let mut orchestrator = ai::AiOrchestrator::from_env("logs/ai_tool_calls")
         .context("failed to initialize AI runtime from env")?;
-    if orchestrator.mode() == ai::AiMode::Off {
-        orchestrator
-            .set_mode(ai::AiMode::Api)
-            .context("AI mode is OFF; set AI_MODE=API or AI_MODE=LOCAL")?;
-    }
-
+    log::info!(
+        "world builder requested in mode {}",
+        orchestrator.mode().as_str()
+    );
     let scene = orchestrator
         .world_builder(&prompt)
         .context("world builder failed")?;

@@ -69,6 +69,23 @@ Flow:
   - Local MLL supervisor in separate process (`llama-server` compatible)
   - Audit logs in `logs/ai_tool_calls/YYYY-MM-DD.log`
   - World Builder generation + scene export to `samples/generated_scene.json`
-- Pending for next iteration:
-  - Real provider HTTP tool-calling in `API` mode
-  - IPC RPC schema for deep local model tool invocation
+- Implemented in current iteration (S5):
+  - Remote HTTP tool-calling bridge in `API` mode (JSON schema v1 payload, configurable endpoint, timeout, strict/fallback behavior)
+  - Local RPC tool-calling bridge for `LOCAL` mode via loopback HTTP endpoint
+  - Shared RPC request/response schema for tool invocation:
+    - request: `schema_version`, `session_id`, `mode`, `tool_name`, `params`, `timestamp_utc`
+    - response: `status`, `result`, `error`, `trace_id`
+
+## S5 Env Flags
+
+- API remote tools:
+  - `AI_API_REMOTE_TOOL_CALLS` (`true/false`)
+  - `AI_API_REMOTE_TOOL_CALLS_STRICT` (`true/false`)
+  - `AI_API_TOOL_ENDPOINT` (optional explicit endpoint)
+  - `AI_API_TIMEOUT_MS` (default `8000`)
+
+- LOCAL RPC tools:
+  - `LOCAL_MLL_RPC_TOOL_CALLS` (`true/false`)
+  - `LOCAL_MLL_RPC_TOOL_CALLS_STRICT` (`true/false`)
+  - `LOCAL_MLL_RPC_PATH` (default `/tool-call`)
+  - `LOCAL_MLL_RPC_TIMEOUT_MS` (default `5000`)

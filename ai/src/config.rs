@@ -38,6 +38,10 @@ pub struct ApiConfig {
     pub provider: String,
     pub base_url: Option<String>,
     pub api_key: Option<String>,
+    pub tool_endpoint: Option<String>,
+    pub remote_tool_calls: bool,
+    pub remote_tool_calls_strict: bool,
+    pub timeout_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -48,6 +52,10 @@ pub struct LocalMllConfig {
     pub port: u16,
     pub extra_args: Vec<String>,
     pub max_restarts: u32,
+    pub rpc_tool_calls: bool,
+    pub rpc_tool_calls_strict: bool,
+    pub rpc_path: String,
+    pub rpc_timeout_ms: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -70,6 +78,12 @@ impl EngineAiConfig {
             provider: env_var("AI_API_PROVIDER").unwrap_or_else(|| "openai".to_string()),
             base_url: env_var("AI_API_BASE_URL"),
             api_key: env_var("AI_API_KEY"),
+            tool_endpoint: env_var("AI_API_TOOL_ENDPOINT"),
+            remote_tool_calls: env_bool("AI_API_REMOTE_TOOL_CALLS", false),
+            remote_tool_calls_strict: env_bool("AI_API_REMOTE_TOOL_CALLS_STRICT", false),
+            timeout_ms: env_var("AI_API_TIMEOUT_MS")
+                .and_then(|raw| raw.parse::<u64>().ok())
+                .unwrap_or(8000),
         };
 
         let local = LocalMllConfig {
@@ -85,6 +99,12 @@ impl EngineAiConfig {
             max_restarts: env_var("LOCAL_MLL_MAX_RESTARTS")
                 .and_then(|raw| raw.parse::<u32>().ok())
                 .unwrap_or(2),
+            rpc_tool_calls: env_bool("LOCAL_MLL_RPC_TOOL_CALLS", false),
+            rpc_tool_calls_strict: env_bool("LOCAL_MLL_RPC_TOOL_CALLS_STRICT", false),
+            rpc_path: env_var("LOCAL_MLL_RPC_PATH").unwrap_or_else(|| "/tool-call".to_string()),
+            rpc_timeout_ms: env_var("LOCAL_MLL_RPC_TIMEOUT_MS")
+                .and_then(|raw| raw.parse::<u64>().ok())
+                .unwrap_or(5000),
         };
 
         Self {
@@ -101,6 +121,17 @@ fn env_var(name: &str) -> Option<String> {
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+}
+
+fn env_bool(name: &str, default: bool) -> bool {
+    env_var(name)
+        .map(|raw| {
+            matches!(
+                raw.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(default)
 }
 
 fn split_args(raw: &str) -> Vec<String> {

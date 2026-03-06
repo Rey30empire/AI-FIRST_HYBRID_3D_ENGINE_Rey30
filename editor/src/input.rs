@@ -39,11 +39,11 @@ impl InputState {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 let current = (position.x, position.y);
-                if self.orbit_drag_active {
-                    if let Some(previous) = self.last_cursor {
-                        self.orbit_delta.0 += (current.0 - previous.0) as f32;
-                        self.orbit_delta.1 += (current.1 - previous.1) as f32;
-                    }
+                if self.orbit_drag_active
+                    && let Some(previous) = self.last_cursor
+                {
+                    self.orbit_delta.0 += (current.0 - previous.0) as f32;
+                    self.orbit_delta.1 += (current.1 - previous.1) as f32;
                 }
                 self.last_cursor = Some(current);
             }

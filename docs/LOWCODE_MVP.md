@@ -60,3 +60,18 @@
 - User creates a playable prototype by selecting one template
 - User edits at least 3 nodes without code
 - Runtime executes graph with traceable logs
+
+## Implementation Status (current)
+
+- Implemented tools:
+  - `graph.create`, `graph.add_node`, `graph.connect`, `graph.delete_node`, `graph.delete_edge`
+  - `graph.set_node_params`, `graph.validate`, `graph.run`
+  - `template.list`, `template.apply`
+  - `asset.get_template_bundle`, `asset.validate_template_bundle`
+- Deterministic runtime:
+  - Topological ordering with cycle rejection
+  - Event/flow/side-effect phases with execution summary and logs
+- Editor integration:
+  - `F4/F5/F12` apply templates
+  - `G` executes graph tick (`OnUpdate`)
+  - `V` validates active graph

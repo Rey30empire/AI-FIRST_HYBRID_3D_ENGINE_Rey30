@@ -5,5 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+anyhow.workspace = true
 assets = { path = "../assets" }
 bevy_ecs.workspace = true
+serde.workspace = true
+serde_json.workspace = true

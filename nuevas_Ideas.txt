@@ -1,0 +1,681 @@
+catálogo de tools (tool-calling) + un Command Bus que convierta al MLL en un “operador con brazos” capaz de construir un juego completo (física, disparos, caballos, barcos, partículas, agua, animación, modelado, render, UI, build, etc.). 🧠🛠️🎮
+
+Te dejo una lista amplia y organizada (prácticamente “completa” para un motor serio).
+Ojo: no es para que implementes todo en una semana: es un API contract. Empiezas por el Pack MVP y luego expandes.
+
+0) Principios para que esto funcione sin romper el motor
+
+✅ La IA NO toca memoria interna. Solo llama tools.
+✅ Todo tool = Command con validate/execute/undo.
+✅ Transacciones: begin → many commands → commit/rollback.
+✅ Permisos por tool (read/write/export/network).
+✅ Logs auditables + reproducción (“replay”).
+✅ Tool schemas (JSON Schema) para parámetros.
+✅ Motor determinista donde se pueda (para reproducir bugs).
+
+1) Command Bus (el “sistema nervioso”)
+
+Estos NO son tools para el MLL; son el framework que usan todos los tools.
+
+1.1 Interfaces base
+
+command.validate(ctx) -> ValidationResult
+
+command.execute(ctx) -> CommandResult
+
+command.undo(ctx) -> void
+
+command.serialize() -> json
+
+command.cost_estimate() -> {cpu,gpu,mem,time}
+
+1.2 CommandBus
+
+cmdbus.submit(command)
+
+cmdbus.submit_batch(commands[])
+
+cmdbus.cancel(command_id)
+
+cmdbus.get_status(command_id)
+
+cmdbus.replay(log_id)
+
+1.3 Transactions
+
+txn.begin(name)
+
+txn.add(command)
+
+txn.commit()
+
+txn.rollback()
+
+txn.checkpoint(label)
+
+txn.rollback_to(checkpoint)
+
+1.4 Undo / Redo
+
+history.undo(steps=1)
+
+history.redo(steps=1)
+
+history.mark(label)
+
+history.jump_to(label)
+
+2) Tool Registry (Tool-Calling)
+
+Cada tool es una “habilidad” que el MLL puede invocar.
+
+Convención
+
+tool.* = tools generales
+
+scene.* = escena
+
+entity.* = entidades ECS
+
+asset.* = assets
+
+model.* = modelado
+
+anim.* = animación
+
+phys.* = física
+
+vfx.* = partículas/VFX
+
+water.* = agua
+
+ai.* = IA NPC
+
+net.* = multiplayer
+
+build.* = export/build
+
+debug.* = debug/perf
+
+3) Pack “MVP obligatorio” (si no tienes esto, no hay brazos)
+3.1 Contexto y consulta
+
+tool.get_engine_state() (version, fps, gpu, memory, open_scene)
+
+tool.get_project_tree() (carpetas, assets, scenes, scripts)
+
+tool.search_assets(query)
+
+tool.read_asset_metadata(asset_id)
+
+tool.get_selection() (qué está seleccionado)
+
+tool.set_selection(entity_ids[])
+
+tool.get_viewport_camera()
+
+tool.set_viewport_camera(params)
+
+3.2 Transacciones
+
+tool.begin_transaction(name)
+
+tool.commit_transaction()
+
+tool.rollback_transaction()
+
+tool.create_checkpoint(label)
+
+tool.rollback_to_checkpoint(label)
+
+3.3 Logging / trace
+
+tool.log(message, level)
+
+tool.open_task(title)
+
+tool.update_task(task_id, progress)
+
+tool.close_task(task_id, status)
+
+4) Scene & World Tools
+4.1 Scenes
+
+scene.create(name)
+
+scene.open(scene_id)
+
+scene.save()
+
+scene.save_as(name)
+
+scene.duplicate(scene_id)
+
+scene.close()
+
+scene.set_sky(preset)
+
+scene.set_time_of_day(value)
+
+scene.add_fog(params)
+
+scene.add_postprocess(params)
+
+4.2 World streaming (si quieres mundos grandes)
+
+scene.enable_world_streaming(chunksize, range)
+
+scene.create_stream_chunk(params)
+
+scene.assign_entity_to_chunk(entity_id, chunk_id)
+
+5) ECS / Entidades / Componentes
+5.1 Entidades
+
+entity.create(name, archetype?)
+
+entity.clone(entity_id)
+
+entity.delete(entity_id)
+
+entity.rename(entity_id, name)
+
+entity.parent(child_id, parent_id)
+
+entity.unparent(child_id)
+
+entity.find_by_name(name)
+
+entity.find_by_tag(tag)
+
+5.2 Transform
+
+entity.get_transform(entity_id)
+
+entity.set_transform(entity_id, pos, rot, scale)
+
+entity.translate(entity_id, delta)
+
+entity.rotate(entity_id, delta)
+
+entity.scale(entity_id, factor)
+
+5.3 Components (genérico)
+
+entity.add_component(entity_id, component_type, data)
+
+entity.remove_component(entity_id, component_type)
+
+entity.get_component(entity_id, component_type)
+
+entity.set_component(entity_id, component_type, data)
+
+6) Asset Pipeline (importar/generar/optimizar)
+6.1 Import & Create
+
+asset.import_file(path, options) (gltf/fbx/obj/wav/png…)
+
+asset.import_url(url, options) (si lo permites)
+
+asset.create_material(name, preset)
+
+asset.create_texture(name, width, height, format)
+
+asset.create_shader(name, template)
+
+asset.create_prefab(name, entity_id)
+
+asset.save_prefab(prefab_id)
+
+asset.instantiate_prefab(prefab_id, transform)
+
+6.2 Process & Optimize
+
+asset.rebuild_import(asset_id)
+
+asset.generate_lods(mesh_id, params)
+
+asset.mesh_optimize(mesh_id, params)
+
+asset.compress_textures(asset_id, format)
+
+asset.bake_lightmaps(params)
+
+asset.bake_reflection_probes(params)
+
+7) Rendering / Lighting / Materials (para “wow” visual)
+7.1 Renderer controls
+
+render.set_quality(preset) (low/med/high/ultra)
+
+render.set_resolution(width,height,scale)
+
+render.enable_hdr(on)
+
+render.set_aa(mode)
+
+render.set_shadow_quality(params)
+
+render.set_global_illumination(mode)
+
+render.set_raytracing(on) (si aplica)
+
+7.2 Lights & Camera
+
+render.create_light(type, params)
+
+render.set_light_params(light_id, params)
+
+render.create_camera(params)
+
+render.set_camera_params(camera_id, params)
+
+render.capture_screenshot(path)
+
+render.capture_video(params)
+
+7.3 Materials
+
+render.assign_material(entity_id, material_id, slot?)
+
+render.set_material_param(material_id, key, value)
+
+render.link_texture(material_id, slot, texture_id)
+
+8) Physics & Collisions (caballos, barcos, disparos necesitan esto)
+8.1 Colliders
+
+phys.add_collider(entity_id, shape, params)
+
+phys.set_collider(entity_id, params)
+
+phys.remove_collider(entity_id)
+
+phys.generate_mesh_collider(entity_id, mesh_id, mode)
+
+8.2 Rigid bodies
+
+phys.add_rigidbody(entity_id, type, params) (dynamic/static/kinematic)
+
+phys.set_mass(entity_id, mass)
+
+phys.set_friction(entity_id, value)
+
+phys.set_restitution(entity_id, value)
+
+phys.apply_force(entity_id, vec3)
+
+phys.apply_impulse(entity_id, vec3)
+
+phys.set_gravity(vec3)
+
+phys.raycast(origin, dir, maxdist, mask)
+
+phys.overlap(shape, params)
+
+8.3 Constraints
+
+phys.add_joint(type, entity_a, entity_b, params)
+
+phys.set_joint_params(joint_id, params)
+
+phys.remove_joint(joint_id)
+
+8.4 Character controller (para “saltos”, “correr”, “caballo”)
+
+phys.add_character_controller(entity_id, params)
+
+phys.character_move(entity_id, input, dt)
+
+phys.character_jump(entity_id, strength)
+
+phys.character_set_state(entity_id, state)
+
+9) Gameplay Framework (disparos, armas, pickups, daño)
+9.1 Input mapping
+
+game.create_input_action(name, bindings[])
+
+game.bind_action(name, target_script_event)
+
+game.set_rebind(action, binding)
+
+9.2 Combat / Weapons
+
+game.create_weapon(name, params) (rate, recoil, spread, ammo)
+
+game.attach_weapon(character_id, weapon_id, socket)
+
+game.fire_weapon(weapon_id) (para pruebas)
+
+game.create_projectile(params)
+
+game.apply_damage(target_id, amount, type)
+
+game.add_health_component(entity_id, params)
+
+9.3 Interactions
+
+game.add_trigger(entity_id, shape, params)
+
+game.add_pickup(entity_id, item_data)
+
+game.add_inventory(entity_id, params)
+
+game.add_interactable(entity_id, prompt, actions[])
+
+10) Animation / Rigging (caballos, personajes, barcos con velas, etc.)
+10.1 Animator
+
+anim.add_animator(entity_id, controller_id)
+
+anim.create_state_machine(name)
+
+anim.add_state(controller_id, state_name, clip_id)
+
+anim.add_transition(controller_id, from, to, conditions)
+
+anim.set_parameter(controller_id, key, value)
+
+anim.play(entity_id, clip_id)
+
+anim.blend(entity_id, clip_a, clip_b, weight)
+
+10.2 IK / Retarget
+
+anim.add_ik(entity_id, chain, params)
+
+anim.retarget(source_rig, target_rig, mapping)
+
+anim.bake_animation(entity_id, params)
+
+11) Modeling Tools (Blender-like, pero como tools)
+
+(Esto es lo que permite “crear personaje” sin salir del motor.)
+
+11.1 Primitives & Edit
+
+model.create_primitive(type, params)
+
+model.enter_edit_mode(mesh_id)
+
+model.exit_edit_mode(mesh_id)
+
+model.select(mesh_id, mode, selector)
+
+model.extrude(mesh_id, selection, params)
+
+model.inset(mesh_id, selection, params)
+
+model.bevel(mesh_id, selection, params)
+
+model.loop_cut(mesh_id, params)
+
+model.knife(mesh_id, path)
+
+model.merge(mesh_id, params)
+
+model.subdivide(mesh_id, params)
+
+model.triangulate(mesh_id, params)
+
+11.2 Modifiers stack
+
+model.add_modifier(mesh_id, type, params)
+
+model.set_modifier(mesh_id, modifier_id, params)
+
+model.apply_modifier(mesh_id, modifier_id)
+
+model.remove_modifier(mesh_id, modifier_id)
+
+11.3 UV
+
+model.unwrap_uv(mesh_id, method, params)
+
+model.pack_uv(mesh_id, params)
+
+model.generate_lightmap_uv(mesh_id, params)
+
+11.4 Remesh / Decimate
+
+model.voxel_remesh(mesh_id, resolution)
+
+model.decimate(mesh_id, ratio)
+
+model.smooth(mesh_id, iterations)
+
+11.5 Sculpt lite
+
+model.sculpt_brush(mesh_id, brush_type, params) (grab/smooth/inflate/crease)
+
+model.sculpt_mask(mesh_id, params)
+
+12) VFX / Particles (agua cayendo, humo, magia)
+12.1 Particles
+
+vfx.create_particle_system(name, params)
+
+vfx.set_emitter(particle_id, params)
+
+vfx.set_forces(particle_id, params)
+
+vfx.set_collision(particle_id, params)
+
+vfx.set_renderer(particle_id, params) (sprite/mesh)
+
+vfx.attach_to_entity(particle_id, entity_id, socket)
+
+12.2 VFX Graph (si haces nodos)
+
+vfx.create_graph(name)
+
+vfx.add_node(graph_id, node_type, params)
+
+vfx.connect(graph_id, out_node, in_node)
+
+vfx.compile_graph(graph_id)
+
+13) Water / Ocean (barcos navegando)
+13.1 Water system
+
+water.create_ocean(params) (size, waves, wind)
+
+water.create_river(path, params)
+
+water.create_waterfall(params)
+
+water.set_waves(ocean_id, params)
+
+water.enable_foam(ocean_id, params)
+
+water.enable_refraction(ocean_id, params)
+
+water.enable_caustics(ocean_id, params)
+
+13.2 Boat physics helpers
+
+water.add_buoyancy(entity_id, params)
+
+water.add_drag(entity_id, params)
+
+water.sample_height(ocean_id, position)
+
+14) Vehicles / Mounts (caballos)
+14.1 Mount system
+
+mount.create_horse_template(params) (rig, anim set, stats)
+
+mount.spawn_horse(template_id, transform)
+
+mount.mount_rider(horse_id, rider_id)
+
+mount.dismount(rider_id)
+
+mount.set_gait(horse_id, gait) (walk/trot/gallop)
+
+mount.set_path_follow(horse_id, path_id)
+
+(Esto es gameplay + anim + phys; como tools lo simplificas con plantillas.)
+
+15) NPC AI (enemigos, comportamiento)
+
+ai.create_navmesh(params)
+
+ai.bake_navmesh()
+
+ai.add_agent(entity_id, params)
+
+ai.set_destination(agent_id, position)
+
+ai.create_behavior_tree(name)
+
+ai.bt_add_node(tree_id, type, params)
+
+ai.bt_connect(tree_id, parent, child)
+
+ai.assign_behavior(entity_id, tree_id)
+
+ai.set_blackboard(entity_id, key, value)
+
+16) UI / HUD (vida, ammo, minimap)
+
+ui.create_canvas(name)
+
+ui.add_panel(canvas_id, params)
+
+ui.add_text(canvas_id, params)
+
+ui.add_button(canvas_id, params)
+
+ui.bind_to_data(ui_id, entity_id, component_field)
+
+ui.create_hud_template(type) (shooter/platformer)
+
+17) Audio (shots, pasos, agua)
+
+audio.import_clip(path)
+
+audio.create_source(entity_id, params)
+
+audio.play(source_id, clip_id)
+
+audio.set_spatial(source_id, params)
+
+audio.create_mixer(params)
+
+audio.route(source_id, mixer_bus)
+
+18) Networking (si lo quieres)
+
+net.create_server(params)
+
+net.connect_client(params)
+
+net.enable_replication(entity_id, components[])
+
+net.set_prediction(mode)
+
+net.set_rollback(params)
+
+19) Build / Export (para “game listo”)
+
+build.set_target(platform)
+
+build.set_bundle_id(id)
+
+build.set_version(version)
+
+build.enable_feature(flag)
+
+build.export_project(path)
+
+build.build_and_run()
+
+build.generate_installer(params)
+
+20) Debug / Profiling (para que no muera el performance)
+
+debug.show_colliders(on)
+
+debug.show_navmesh(on)
+
+debug.toggle_wireframe(on)
+
+debug.capture_frame() (GPU capture)
+
+debug.get_profiler_snapshot()
+
+debug.find_performance_hotspots()
+
+21) “Game Generator” Tools (lo que hace magia en tu chat)
+
+Estos tools son macro-tools que internamente llaman a muchos tools pequeños:
+
+21.1 Templates
+
+gen.create_game_from_template(template_id, params)
+
+gen.create_platformer_level(params)
+
+gen.create_shooter_arena(params)
+
+gen.create_island_adventure(params)
+
+21.2 Prompt → Plan → Execute
+
+gen.plan_from_prompt(prompt) -> task_graph
+
+gen.execute_plan(task_graph)
+
+gen.validate_gameplay(min_requirements)
+
+gen.package_demo_build()
+
+22) Qué necesitas “darle” al MLL (para que manipule al extremo)
+
+No le das “poder bruto”. Le das:
+
+✅ Tool schemas (qué tools existen y cómo se llaman)
+✅ State snapshot (escena actual, assets, errores, profiler)
+✅ Rules (permisos, límites, no borrar sin confirmar, rollback)
+✅ Memory de proyecto (estilo, targets, plataforma, FPS objetivo)
+✅ Feedback loop (resultado de cada comando, logs, diffs)
+
+Contexto mínimo por ciclo
+
+escena abierta + jerarquía resumida
+
+selección actual
+
+recursos disponibles (GPU/CPU/RAM/VRAM)
+
+errores del engine + warnings
+
+objetivo (“haz isla con castillo…”)
+
+constraints (“60 FPS 1080p”, “sin assets externos”, etc.)
+
+23) Pack inicial recomendado (para empezar YA sin ahogarte)
+
+Si quieres resultados rápido, implementa primero:
+
+tool.begin/commit/rollback_transaction
+
+scene.create/open/save
+
+entity.create/add_component/set_transform
+
+asset.import_file/create_material/assign_material
+
+render.create_light/set_postprocess
+
+phys.add_collider/add_rigidbody/character_controller
+
+vfx.create_particle_system
+
+build.build_and_run
+
+gen.plan_from_prompt + gen.execute_plan (aunque sea básico)
+
+Con eso tu IA ya puede armar un shooter simple o plataforma.
